@@ -319,7 +319,7 @@ sub _send_request_expect_nothing {
     return 1 if $response->code =~ /^2\d\d$/;
 
     # anything else is a failure, and we save the parsed result
-    $self->_remember_errors($response->content);
+    $self->_remember_errors($response->content, 1);
     return 0;
 }
 
@@ -355,7 +355,7 @@ sub _send_request_expect_nothing_probed {
     return 1 if $response->code =~ /^2\d\d$/;
 
     # anything else is a failure, and we save the parsed result
-    $self->_remember_errors($response->content);
+    $self->_remember_errors($response->content, 1);
     return 0;
 }
 
@@ -370,12 +370,13 @@ sub _croak_if_response_error {
 }
 
 sub _xpc_of_content {
-    return XMLin($_[1], 'SuppressEmpty' => '', 'ForceArray' => ['Contents']);
+    my ($self, $src, $keep_root) = @_;
+    return XMLin($src, 'SuppressEmpty' => '', 'ForceArray' => ['Contents'], 'KeepRoot' => $keep_root);
 }
 
 # returns 1 if errors were found
 sub _remember_errors {
-    my ($self, $src) = @_;
+    my ($self, $src, $keep_root) = @_;
 
     unless (ref $src || $src =~ m/^[[:space:]]*</) {    # if not xml
         (my $code = $src) =~ s/^[[:space:]]*\([0-9]*\).*$/$1/;
@@ -384,7 +385,7 @@ sub _remember_errors {
         return 1;
     }
 
-    my $r = ref $src ? $src : $self->_xpc_of_content($src);
+    my $r = ref $src ? $src : $self->_xpc_of_content($src, $keep_root);
 
     if ($r->{Error}) {
         $self->err($r->{Error}{Code});
