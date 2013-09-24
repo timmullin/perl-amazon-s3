@@ -4,6 +4,10 @@ use warnings;
 use Carp;
 use File::stat;
 use IO::File;
+use Digest::MD5 qw(md5 md5_hex);
+use Digest::MD5::File qw(file_md5 file_md5_hex);
+use MIME::Base64;
+use XML::LibXML;
 
 use base qw(Class::Accessor::Fast);
 __PACKAGE__->mk_accessors(qw(bucket creation_date account));
@@ -35,11 +39,24 @@ sub add_key {
     }
 
     if (ref($value) eq 'SCALAR') {
+        my $md5_hex = file_md5_hex($$value);
+        my $md5 = pack( 'H*', $md5_hex );
+        my $md5_base64 = encode_base64($md5);
+        chomp $md5_base64;
+
+        $conf->{'Content-MD5'} = $md5_base64;
+
         $conf->{'Content-Length'} ||= -s $$value;
         $value = _content_sub($$value);
     }
     else {
         $conf->{'Content-Length'} ||= length $value;
+
+        my $md5        = md5($value);
+        my $md5_hex    = unpack( 'H*', $md5 );
+        my $md5_base64 = encode_base64($md5);
+
+        $conf->{'Content-MD5'} = $md5_base64;
     }
 
     # If we're pushing to a bucket that's under DNS flux, we might get a 307
@@ -59,6 +76,179 @@ sub add_key {
 sub add_key_filename {
     my ($self, $key, $value, $conf) = @_;
     return $self->add_key($key, \$value, $conf);
+}
+
+#
+# Initiate a multipart upload operation
+# This is necessary for uploading files > 5Gb to Amazon S3
+# Returns the Upload ID assigned by Amazon, 
+# This is needed to identify this particular upload in other operations
+#
+sub initiate_multipart_upload {
+    my ($self, $key, $conf) = @_;
+
+    croak "Object key is required" unless $key;
+
+    my $acct = $self->account;
+
+    my $request = $acct->_make_request("POST", $self->_uri($key) . '?uploads', $conf);
+    my $response = $acct->_do_http($request);
+
+    $acct->_croak_if_response_error($response);
+
+    my $r = $acct->_xpc_of_content($response->content);
+
+    return $r->{UploadId};
+}
+
+#
+# Upload a part of a file as part of a multipart upload operation
+# Each part must be at least 5mb (except for the last piece).
+# This returns the Amazon-generated eTag for the uploaded file segment.
+# It is necessary to keep track of the eTag for each part number
+# The complete operation will want a sequential list of all the part 
+# numbers along with their eTags.
+#
+sub upload_part_of_multipart_upload {
+    my ($self, $key, $upload_id, $part_number, $data, $length) = @_;
+
+    croak "Object key is required" unless $key;
+    croak "Upload id is required" unless $upload_id;
+    croak "Part Number is required" unless $part_number;
+
+    my $conf = {};
+    my $acct = $self->account;
+
+    # Make sure length and md5 are set
+    my $md5        = md5($data);
+    my $md5_hex    = unpack( 'H*', $md5 );
+    my $md5_base64 = encode_base64($md5);
+
+    $conf->{'Content-MD5'} = $md5_base64;
+    $conf->{'Content-Length'} = $length;
+
+    my $params = "?partNumber=${part_number}&uploadId=${upload_id}";
+    my $request = $acct->_make_request("PUT", $self->_uri($key) . $params, $conf, $data);
+    my $response = $acct->_do_http($request);
+
+    $acct->_croak_if_response_error($response);
+
+    # We'll need to save the etag for later when completing the transaction
+    my $etag = $response->header('ETag');
+    if ($etag) {
+        $etag =~ s/^"//;
+        $etag =~ s/"$//;
+    }
+
+    return $etag;
+}
+
+#
+# Inform Amazon that the multipart upload has been completed
+# You must supply a hash of part Numbers => eTags
+# For amazon to use to put the file together on their servers.
+#
+sub complete_multipart_upload {
+    my ($self, $key, $upload_id, $parts_hr) = @_;
+
+    croak "Object key is required" unless $key;
+    croak "Upload id is required" unless $upload_id;
+    croak "Part number => etag hashref is required" unless (ref $parts_hr eq 'HASH');
+
+    # The complete command requires sending a block of xml containing all 
+    # the part numbers and their associated etags (returned from the upload)
+
+    #build XML doc
+    my $xml_doc = XML::LibXML::Document->new('1.0','UTF-8');
+    my $root_element = $xml_doc->createElement('CompleteMultipartUpload');
+    $xml_doc->addChild($root_element);
+
+    # Add the content
+    foreach my $part_num (sort {$a <=> $b} keys %$parts_hr) {
+
+        # For each part, create a <Part> element with the part number & etag
+        my $part = $xml_doc->createElement('Part');
+        $part->appendTextChild('PartNumber' => $part_num);
+        $part->appendTextChild('ETag' => $parts_hr->{$part_num});
+        $root_element->addChild($part);
+    }
+
+    my $content    = $xml_doc->toString;
+    my $md5        = md5($content);
+    my $md5_base64 = encode_base64($md5);
+    chomp $md5_base64;
+
+    my $conf = {
+        'Content-MD5'    => $md5_base64,
+        'Content-Length' => length $content,
+        'Content-Type'   => 'application/xml'
+    };
+
+    my $acct = $self->account;
+    my $params = "?uploadId=${upload_id}";
+    my $request = $acct->_make_request("POST", $self->_uri($key) . $params, $conf, $content);
+    my $response = $acct->_do_http($request);
+
+    $acct->_croak_if_response_error($response);
+
+    return 1;
+}
+
+#
+# Stop a multipart upload
+#
+sub abort_multipart_upload {
+    my ($self, $key, $upload_id) = @_;
+
+    croak "Object key is required" unless $key;
+    croak "Upload id is required" unless $upload_id;
+
+    my $acct = $self->account;
+    my $params = "?uploadId=${upload_id}";
+    my $request = $acct->_make_request("DELETE", $self->_uri($key) . $params);
+    my $response = $acct->_do_http($request);
+
+    $acct->_croak_if_response_error($response);
+
+    return 1;
+}
+
+#
+# List all the uploaded parts for an ongoing multipart upload
+# It returns the block of XML returned from Amazon
+#
+sub list_multipart_upload_parts {
+    my ($self, $key, $upload_id, $conf) = @_;
+
+    croak "Object key is required" unless $key;
+    croak "Upload id is required" unless $upload_id;
+
+    my $acct = $self->account;
+    my $params = "?uploadId=${upload_id}";
+    my $request = $acct->_make_request("GET", $self->_uri($key) . $params, $conf);
+    my $response = $acct->_do_http($request);
+
+    $acct->_croak_if_response_error($response);
+
+    # Just return the XML, let the caller figure out what to do with it
+    return $response->content;
+}
+
+#
+# List all the currently active multipart upload operations
+# Returns the block of XML returned from Amazon
+#
+sub list_multipart_uploads {
+    my ($self, $conf) = @_;
+
+    my $acct = $self->account;
+    my $request = $acct->_make_request("GET", $self->_uri() . '?uploads', $conf);
+    my $response = $acct->_do_http($request);
+
+    $acct->_croak_if_response_error($response);
+
+    # Just return the XML, let the caller figure out what to do with it
+    return $response->content;
 }
 
 sub head_key {
@@ -93,6 +283,12 @@ sub get_key {
         etag           => $etag,
         value          => $response->content,
     };
+
+    # Validate against data corruption by verifying the MD5
+    if ($method eq 'GET') {
+        my $md5 = ($filename and -f $filename) ? file_md5_hex($filename) : md5_hex($return->{value});
+        croak "Computed and Response MD5's do not match:  $md5 : $etag" unless ($md5 eq $etag);
+    }
 
     foreach my $header ($response->headers->header_field_names) {
         next unless $header =~ /x-amz-meta-/i;
