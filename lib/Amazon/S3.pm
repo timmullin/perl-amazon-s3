@@ -13,7 +13,7 @@ use XML::Simple;
 
 use base qw(Class::Accessor::Fast);
 __PACKAGE__->mk_accessors(
-    qw(aws_access_key_id aws_secret_access_key secure ua err errstr timeout retry host)
+    qw(aws_access_key_id aws_secret_access_key token secure ua err errstr timeout retry host)
 );
 our $VERSION = '0.45';
 
@@ -180,12 +180,18 @@ sub list_bucket {
         my $strip_delim = qr/$conf->{delimiter}$/;
 
         foreach my $node ($r->{CommonPrefixes}) {
-            my $prefix = $node->{Prefix};
+            if ( ref($node) ne 'ARRAY') {
+             $node = [ $node ];
+            }
 
-            # strip delimiter from end of prefix
-            $prefix =~ s/$strip_delim//;
+            foreach my $n (@$node) {
+               my $prefix = $n->{Prefix};
 
-            push @common_prefixes, $prefix;
+              # strip delimiter from end of prefix
+              $prefix =~ s/$strip_delim//;
+
+              push @common_prefixes, $prefix;
+            }
         }
         $return->{common_prefixes} = \@common_prefixes;
     }
@@ -387,27 +393,30 @@ sub _remember_errors {
 
     my $r = ref $src ? $src : $self->_xpc_of_content($src, $keep_root);
 
-    if ($r->{Error}) {
-        $self->err($r->{Error}{Code});
-        $self->errstr($r->{Error}{Message});
+    if ($r->{Code}) {
+        $self->err($r->{Code});
+        $self->errstr($r->{Message});
         return 1;
     }
     return 0;
 }
 
 sub _add_auth_header {
-    my ($self, $headers, $method, $path) = @_;
-    my $aws_access_key_id     = $self->aws_access_key_id;
-    my $aws_secret_access_key = $self->aws_secret_access_key;
-
-    if (not $headers->header('Date')) {
-        $headers->header(Date => time2str(time));
-    }
-    my $canonical_string = $self->_canonical_string($method, $path, $headers);
-    my $encoded_canonical =
-      $self->_encode($aws_secret_access_key, $canonical_string);
-    $headers->header(
-        Authorization => "AWS $aws_access_key_id:$encoded_canonical");
+  my ($self, $headers, $method, $path) = @_;
+  my $aws_access_key_id     = $self->aws_access_key_id;
+  my $aws_secret_access_key = $self->aws_secret_access_key;
+  
+  if (not $headers->header('Date')) {
+    $headers->header(Date => time2str(time));
+  }
+  
+  if ( $self->token ) {
+    $headers->header($AMAZON_HEADER_PREFIX . 'security-token', $self->token);
+  }
+  
+  my $canonical_string = $self->_canonical_string($method, $path, $headers);
+  my $encoded_canonical = $self->_encode($aws_secret_access_key, $canonical_string);
+  $headers->header( Authorization => "AWS $aws_access_key_id:$encoded_canonical");
 }
 
 # generates an HTTP::Headers objects given one hash that represents http
@@ -638,6 +647,14 @@ only have come from you.
 
 B<DO NOT INCLUDE THIS IN SCRIPTS OR APPLICATIONS YOU
 DISTRIBUTE. YOU'LL BE SORRY.>
+
+=item token
+
+An optional temporary token that will be inserted in the request along
+with your access and secret key.  A token is used in conjunction with
+temporary credentials when your EC2 instance has
+assumed a role and you've scraped the temporary credentials from
+I<http://169.254.169.254/latest/meta-data/iam/security-credentials>
 
 =item secure
 
