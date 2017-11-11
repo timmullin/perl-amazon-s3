@@ -12,7 +12,7 @@ README in the `dist` directory.
 To build an rpm from this:
 
 ```
-git clone http://gitlab.signatureinfo.net/perl-Amazon-S3.git
+git clone http://gitlab.signatureinfo.net/sis/perl-Amazon-S3.git
 cd perl-Amazon-S3
 autoreconf -i --force
 ./configure
