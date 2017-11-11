@@ -206,7 +206,7 @@ sub list_bucket_all {
     croak 'must specify bucket' unless $bucket;
 
     my $response = $self->list_bucket($conf);
-    return $response unless $response->{is_truncated};
+    return $response unless ref($response) && $response->{is_truncated};
     my $all = $response;
 
     while (1) {
