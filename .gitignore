@@ -1,4 +1,9 @@
-**/Makefile.in
+*.tar.gz
+*.spec
+config.status
 aclocal.m4
 autom4te.cache/*
 configure
+config.log
+**/Makefile.in
+Makefile

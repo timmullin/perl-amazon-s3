@@ -185,7 +185,8 @@ sub list_bucket {
             }
 
             foreach my $n (@$node) {
-               my $prefix = $n->{Prefix};
+	      next unless exists $n->{Prefix};
+	      my $prefix = $n->{Prefix};
 
               # strip delimiter from end of prefix
               $prefix =~ s/$strip_delim//;
