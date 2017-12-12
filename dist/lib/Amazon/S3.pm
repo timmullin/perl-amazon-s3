@@ -394,11 +394,12 @@ sub _remember_errors {
 
     my $r = ref $src ? $src : $self->_xpc_of_content($src, $keep_root);
 
-    if ($r->{Code}) {
-        $self->err($r->{Code});
-        $self->errstr($r->{Message});
-        return 1;
+    if ($r->{Error}) {
+      $self->err($r->{Error}->{Code});
+      $self->errstr($r->{Error}->{Message});
+      return 1;
     }
+    
     return 0;
 }
 
