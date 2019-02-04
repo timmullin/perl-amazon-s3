@@ -17,6 +17,7 @@ WriteMakefile(
         'MIME::Base64'               => '0',
         'Test::More'                 => '0.01',    # for testing
         'XML::Simple'                => '1.08',
+        'XML::LibXML'                => '0',
         'URI::Escape'                => '0',
     }
 );

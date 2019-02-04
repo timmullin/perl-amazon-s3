@@ -30,4 +30,4 @@ itself does a normal Perl build.*
 
 # Carps & Complaint Department
 
-rlauer@signatureinfo.com
+bigfoot@cpan.org

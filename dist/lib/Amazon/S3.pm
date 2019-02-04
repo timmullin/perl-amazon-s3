@@ -15,7 +15,7 @@ use base qw(Class::Accessor::Fast);
 __PACKAGE__->mk_accessors(
     qw(aws_access_key_id aws_secret_access_key token secure ua err errstr timeout retry host)
 );
-our $VERSION = '0.45';
+our $VERSION = '0.47';
 
 my $AMAZON_HEADER_PREFIX = 'x-amz-';
 my $METADATA_PREFIX      = 'x-amz-meta-';
@@ -189,7 +189,8 @@ sub list_bucket {
 	      my $prefix = $n->{Prefix};
 
               # strip delimiter from end of prefix
-              $prefix =~ s/$strip_delim//;
+              $prefix =~ s/$strip_delim//
+                if $prefix;
 
               push @common_prefixes, $prefix;
             }

@@ -1,4 +1,4 @@
-AC_INIT([perl-Amazon-S3], [1.0.1], [rlauer@signatureinfo.com],[ perl-Amazon-S3])
+AC_INIT([perl-Amazon-S3], [1.0.3], [bigfoot@cpan.org],[ perl-Amazon-S3])
 
 __poor_mans_expand_file_name () {
     _tmp_name=$1

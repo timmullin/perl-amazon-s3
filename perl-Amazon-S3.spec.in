@@ -10,7 +10,6 @@
 Name:     %{project_base}
 Version:  %(echo @PACKAGE_VERSION@ | awk -F- '{print $1}')
 Release:  %{release}
-Vendor:   Signature Information Solutions
 Source:   %{pkgname}.tar.gz
 
 %define _prefix         /opt/sis

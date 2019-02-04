@@ -43,6 +43,7 @@ This module requires these other modules and libraries:
         MIME::Base64               
         Test::More                  # for testing
         XML::Simple
+        XML::LibXML
         URI::Escape                
 
 COPYRIGHT AND LICENCE
